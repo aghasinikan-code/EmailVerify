@@ -15,6 +15,7 @@ const md5hash = require("../crypto/Crypto");
 const EmailUser = require("../database/EmailUser");
 const ErrorNotifier = require("../utils/ErrorNotifier");
 const { resolveVerificationRoles, unverifyPreviousHolder } = require("../utils/resolveVerificationRoles");
+const { reconcileFormRoles } = require('../utils/reconcileFormRoles');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -80,6 +81,7 @@ module.exports = {
                 if (roleUnverified) {
                     await verifyMember.roles.remove(roleUnverified).catch(() => {});
                 }
+                await reconcileFormRoles(verifyMember);
             } catch (e) {
                 await interaction.reply({
                     content: `Failed to assign role to user. Make sure the user is in the server and the bot has proper permissions.\nError: ${e.message}`,
@@ -107,4 +109,3 @@ module.exports = {
         });
     }
 };
-

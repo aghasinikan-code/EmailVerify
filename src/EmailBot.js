@@ -36,6 +36,7 @@ const onboarding = require('./utils/onboarding');
 const OperatorWebhook = require('./utils/OperatorWebhook');
 const analytics = require('./utils/Analytics');
 const permissions = require('./utils/permissions');
+const { reconcileFormRoles, reconcileGuildFormRoles } = require('./utils/reconcileFormRoles');
 
 // Verification code lifetime and the number of wrong guesses tolerated before the
 // code is invalidated. The old in-memory codes had neither, leaving a 100k-keyspace
@@ -572,6 +573,12 @@ bot.once('clientReady', async () => {
     }
     await primeGuilds(bot);
 
+    // Reproduce the UHS Sapphire role connections for members who already have
+    // their source roles. Future source-role changes are handled below.
+    for (const guild of bot.guilds.cache.values()) {
+        await reconcileGuildFormRoles(guild)
+    }
+
     // Seed guild group properties (name / member count) for this shard's guilds so
     // PostHog group analytics have labels from the first boot onward.
     for (const g of bot.guilds.cache.values()) analytics.identifyGuild(g)
@@ -699,6 +706,13 @@ bot.on("guildMemberAdd", async member => {
             await sendVerifyMessage(member.guild, member.user)
         }
     })
+})
+
+// Assign or remove the matching form role whenever a student's year, X/Y side,
+// verified status, or house changes. Changes made by the reconciler emit one
+// more update, which is a no-op because the role is then already correct.
+bot.on('guildMemberUpdate', (_before, after) => {
+    reconcileFormRoles(after)
 })
 
 bot.on('guildCreate', guild => {
@@ -1481,6 +1495,7 @@ bot.on('interactionCreate', async interaction => {
                     if (roleUnverified) {
                         await verifyMember.roles.remove(roleUnverified).catch(() => {})
                     }
+                    await reconcileFormRoles(verifyMember)
                 } catch (e) {
                     // Restore the code so the user can resubmit once the admin fixes the
                     // bot's permissions, notify admins (no `interaction`, so no duplicate
