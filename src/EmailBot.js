@@ -19,6 +19,8 @@ const {getLocale, defaultLanguage} = require('./Language')
 require("./database/ServerSettings");
 const ServerStatsAPI = require("./api/ServerStatsAPI");
 const topggAPI = require("./api/TopGG")
+const discordBotList = require("./api/DiscordBotList")
+const { startBotListStats } = require("./api/BotListStats")
 const MailSender = require("./mail/MailSender")
 const sendVerifyMessage = require("./bot/sendVerifyMessage")
 const {showEmailModal} = require("./bot/showEmailModal")
@@ -28,11 +30,13 @@ const UserTimeout = require("./UserTimeout");
 const md5hash = require("./crypto/Crypto");
 const EmailUser = require("./database/EmailUser");
 const { MessageFlags } = require('discord.js');
-const { createSessionExpiredEmbed, createCodeExpiredEmbed, createTooManyAttemptsEmbed, createGenericErrorEmbed, createInvalidCodeEmbed, createInvalidEmailEmbed, createVerificationSuccessEmbed, createCodeSentEmbed, createMailLimitReachedEmbed } = require('./utils/embeds');
+const { createSessionExpiredEmbed, createCodeExpiredEmbed, createTooManyAttemptsEmbed, createGenericErrorEmbed, createInvalidCodeEmbed, createInvalidEmailEmbed, createVerificationSuccessEmbed, createCodeSentEmbed } = require('./utils/embeds');
 const { resolveVerificationRoles, unverifyPreviousHolder } = require('./utils/resolveVerificationRoles');
 const ErrorNotifier = require('./utils/ErrorNotifier');
-const { getWebsiteUrl, describeSku, getCurrency } = require('./utils/premiumButtons');
+const { describeSku, getCurrency, buildGetBotRow } = require('./utils/premiumButtons');
 const onboarding = require('./utils/onboarding');
+const { startSetupNudges } = require('./utils/setupNudges');
+const voting = require('./utils/voting');
 const OperatorWebhook = require('./utils/OperatorWebhook');
 const analytics = require('./utils/Analytics');
 const permissions = require('./utils/permissions');
@@ -231,7 +235,7 @@ async function handleResendCode(interaction, guildId) {
                     resend: true
                 }
             })
-            await interaction.editReply({ embeds: [createMailLimitReachedEmbed(language, getWebsiteUrl())] }).catch(() => {})
+            await interaction.editReply(await voting.limitReachedMessage(language, guildId)).catch(() => {})
             premiumManager.notifyMailDenied(userGuild, language).catch(() => {})
             autoDelete(15000)
             return
@@ -553,13 +557,15 @@ bot.once('clientReady', async () => {
             }
         })
     }
-    // Only in unsharded mode, post TopGG stats from client
+    // Only in unsharded mode, post bot-list stats from the client (the sharding
+    // manager does it otherwise)
     if (!bot.shard) {
         try {
             topggAPI(bot);
         } catch (e) {
             console.error('Failed to start TopGG API:', e);
         }
+        startBotListStats(bot);
     }
 
     // Publish the command set once, then retire the guild-scoped copies this shard's
@@ -567,6 +573,10 @@ bot.once('clientReady', async () => {
     // before the global ones are live.
     const published = await registerGlobalCommands();
     if (published) {
+        // Mirror the same command set onto the discordbotlist.com page. Every shard
+        // publishes to Discord, but one listing update per boot is enough, so only the
+        // primary shard sends it. Not awaited: it must never delay the cleanup below.
+        if (!bot.shard || bot.shard.ids.includes(0)) discordBotList.postCommands(commands);
         await clearStaleGuildCommands(bot);
     } else {
         console.warn('[Commands] Global registration failed — leaving existing guild commands in place');
@@ -582,6 +592,10 @@ bot.once('clientReady', async () => {
     // Seed guild group properties (name / member count) for this shard's guilds so
     // PostHog group analytics have labels from the first boot onward.
     for (const g of bot.guilds.cache.values()) analytics.identifyGuild(g)
+
+    // Setup follow-ups for new servers that haven't verified anyone yet. Every shard runs
+    // its own check over the guilds it holds.
+    startSetupNudges(bot)
 
     // Prime the entitlement cache so updates arrive with a prior state to diff against
     // (a consumption or removal is otherwise indistinguishable from an opaque update),
@@ -679,6 +693,9 @@ bot.on("guildDelete", guild => {
 })
 
 bot.on("guildMemberAdd", async member => {
+    // Other bots can't verify by email. Without this they got the unverified role, which
+    // can lock them out of channels, and an auto-verify DM they can never read.
+    if (member.user.bot) return
     await database.getServerSettings(member.guild.id, async serverSettings => {
         analytics.capture({
             event: 'member_joined',
@@ -731,12 +748,7 @@ bot.on('guildCreate', guild => {
     //
     // Fire-and-forget: onboarding must never delay or break command registration. The
     // delivery flags are captured so the effect on first-hour churn is measurable.
-    onboarding.sendOnboarding(guild)
-        .then(result => analytics.capture({
-            event: 'onboarding_sent',
-            guild,
-            properties: { ...result, member_count: guild.memberCount }
-        }))
+    welcomeGuild(guild)
         .catch(e => console.warn(`[Onboarding] failed for ${guild.id}:`, e?.message || e))
         // Permission self-check at the only moment the admin is guaranteed to be looking:
         // right after they added the bot. An invite that granted too little is otherwise
@@ -749,6 +761,16 @@ bot.on('guildCreate', guild => {
         // when the invite was correct.
         .finally(() => checkGuildPermissionHealth(guild, 'guild_joined'))
 })
+
+/** Greet a new guild in its own language and queue its setup follow-ups. */
+async function welcomeGuild(guild) {
+    const { language, delivery } = await onboarding.welcomeGuild(guild)
+    analytics.capture({
+        event: 'onboarding_sent',
+        guild,
+        properties: { ...delivery, member_count: guild.memberCount, language, locale: guild.preferredLocale ?? null }
+    })
+}
 
 /**
  * Audit a guild's permissions and role order and notify its admins if anything is wrong.
@@ -1129,6 +1151,10 @@ bot.on('interactionCreate', async interaction => {
             await handleResendCode(interaction, guildId)
             return
         }
+        if (action === 'vote') {
+            await voting.showVotePrompt(interaction, guildId, 'button')
+            return
+        }
         if (action === 'verifyButton' || action === 'openEmailModal') {
             // showModal is the ack and can't be deferred, so never REST-fetch here.
             // Pass the cached guild for role-name display when this shard owns it; for a
@@ -1319,8 +1345,8 @@ bot.on('interactionCreate', async interaction => {
                             free_limit: premiumCheck.freeLimit ?? null
                         }
                     })
-                    const limitEmbed = createMailLimitReachedEmbed(serverSettings.language, getWebsiteUrl())
-                    await interaction.followUp({ embeds: [limitEmbed], flags: MessageFlags.Ephemeral }).catch(() => {})
+                    const limitMessage = await voting.limitReachedMessage(serverSettings.language, userGuild.id)
+                    await interaction.followUp({ ...limitMessage, flags: MessageFlags.Ephemeral }).catch(() => {})
                     // Record the denial and fire the escalating admin upsell (1st/5th/20th
                     // blocked member per month) — this is lost demand admins can't see otherwise.
                     premiumManager.notifyMailDenied(userGuild, serverSettings.language).catch(() => {})
@@ -1520,7 +1546,14 @@ bot.on('interactionCreate', async interaction => {
                 } catch {}
 
                 const successEmbed = createVerificationSuccessEmbed(language, assignedRoleNames, userGuild.name, userGuild.iconURL({ dynamic: true }))
-                await interaction.editReply({ embeds: [successEmbed] }).catch(() => {})
+                // Free servers carry a "Get EmailVerify for your server" link: the member
+                // who just verified may run a community of their own. Subscribers don't.
+                const successComponents = []
+                if (premiumManager.enabled && !premiumManager.getSubscriptionTier(await getEntitlementsForGuild(userGuild.id, interaction))) {
+                    const getBotRow = buildGetBotRow(language)
+                    if (getBotRow) successComponents.push(getBotRow)
+                }
+                await interaction.editReply({ embeds: [successEmbed], components: successComponents }).catch(() => {})
 
                 // Track successful verification (global and per-guild) and clear the rate limiter
                 // so a returning user isn't stuck behind the escalating email-send backoff.
@@ -1580,10 +1613,10 @@ bot.on('interactionCreate', async interaction => {
         } catch {
             language = defaultLanguage
         }
-        // Allow all users to use /verify and /data (delete-user subcommand is user-accessible)
-        // and /premium (buy/redeem). Everything else is admin-gated.
+        // Allow all users to use /verify and /data (delete-user subcommand is user-accessible),
+        // /premium (buy/redeem) and /vote. Everything else is admin-gated.
         const isAdmin = interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)
-        const allowed = isAdmin || interaction.commandName === "data" || interaction.commandName === "verify" || interaction.commandName === "premium"
+        const allowed = isAdmin || interaction.commandName === "data" || interaction.commandName === "verify" || interaction.commandName === "premium" || interaction.commandName === "vote"
         let subcommand = null
         try { subcommand = interaction.options.getSubcommand(false) } catch { subcommand = null }
         analytics.capture({

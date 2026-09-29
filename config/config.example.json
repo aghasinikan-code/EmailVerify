@@ -9,12 +9,24 @@
     "isSecure": false,
     "isGoogle": false,
     "topggToken": "",
+    "discordbotlistToken": "",
+    "discordbotsggToken": "",
+    "topggWebhookSecret": "",
+    "discordbotlistWebhookSecret": "",
     "operatorWebhookUrl": "",
     "websiteUrl": "",
+    "supportUrl": "https://discord.gg/fEBSHUQXu2",
+    "onboarding": {
+        "nudgeDelaysHours": [24, 72]
+    },
     "apiBaseUrl": "https://stats.example.com/api/v1",
     "monetization": {
         "enabled": false,
         "freeMonthlyLimit": 25,
+        "voteReward": {
+            "mails": 5,
+            "monthlyCap": 25
+        },
         "currency": "EUR",
         "skus": {
             "subscriptionTier1": "",

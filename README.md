@@ -15,9 +15,9 @@
   <a href="https://github.com/lkaesberg/EmailVerify/stargazers"><img src="https://img.shields.io/github/stars/lkaesberg/EmailVerify?style=social" alt="GitHub stars"></a>
 </p>
     <p>
-    <a href="https://github.com/lkaesberg/EmailBot/issues">Report Bug</a>
+    <a href="https://github.com/lkaesberg/EmailVerify/issues">Report Bug</a>
     ·
-    <a href="https://github.com/lkaesberg/EmailBot/issues">Request Feature</a>
+    <a href="https://github.com/lkaesberg/EmailVerify/issues">Request Feature</a>
     </p>
     <a href="https://getemailverified.com/">🌐 Website</a>
   </p>
@@ -74,7 +74,7 @@ Use this link to invite the bot to your server:
 
 ### Quick Setup
 
-The fastest way: run **`/setup`** — a guided 3-step wizard that configures your verified roles, email domains, and posts the verification message for you. Then run `/testmail` to confirm email delivery.
+The fastest way: run **`/setup`** — a guided wizard that creates the verified role for you (or uses your existing roles), configures email domains, and posts the verification message. Then run `/testmail` to confirm email delivery.
 
 Prefer manual setup?
 
@@ -164,7 +164,7 @@ Assign different roles based on email domain:
 
 | Command | Description |
 |---------|-------------|
-| `/setup` | Guided 3-step setup wizard (roles → domains → verification channel) |
+| `/setup` | Guided setup wizard (verified role, created for you if you like → optional unverified role → domains → verification channel) |
 | `/button <channel> <buttontext>` | Create a verification button embed in a channel |
 | `/testmail <email>` | Send a test verification email to check delivery & spam placement |
 | `/manualverify <user> <email>` | Manually verify a user without email confirmation |
@@ -307,6 +307,9 @@ npm start
 | `smtpHost` | Your SMTP server (e.g., `smtp.gmail.com`) |
 | `isGoogle` | Set to `true` if using Gmail |
 | `topggToken` | *(Optional)* Your Top.gg API token |
+| `discordbotlistToken` | *(Optional)* Your discordbotlist.com API token; posts the server count and command list |
+| `discordbotsggToken` | *(Optional)* Your discord.bots.gg API token; posts the server count |
+| `topggWebhookSecret` / `discordbotlistWebhookSecret` | *(Optional)* Webhook secrets for vote rewards; the endpoints are `/webhooks/topgg` and `/webhooks/discordbotlist` on the stats server (port 8181) |
 
 > 💡 **Gmail Users:** You need to create an [App Password](https://support.google.com/accounts/answer/185833) and use that instead of your regular password.
 
@@ -376,7 +379,7 @@ The upstream source is always available at
 
 If you're self-hosting this bot and find it useful, please consider supporting the development! Your contribution helps keep the project maintained and improved.
 
-![Buy Me A Pizza](https://img.buymeacoffee.com/button-api/?text=Support%20this%20project!&emoji=%F0%9F%8D%95&slug=sral12486&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)
+[![Buy Me A Pizza](https://img.buymeacoffee.com/button-api/?text=Support%20this%20project!&emoji=%F0%9F%8D%95&slug=sral12486&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff)](https://www.buymeacoffee.com/sral12486)
 
 ---
 
